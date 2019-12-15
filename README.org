@@ -1,0 +1,507 @@
+* Introduction
+
+  Doc-Em — document while you code!
+
+  With Doc-Em, you can /jump/ to relevant documentation immediately
+  and update it while you're editing code. /Jump/ in Doc-Em means the
+  cursor stays in the code buffer, but a documentation window is
+  opened on the side and it actively seeks to the relevant point.
+
+  You just need to insert /anchors/ as comments in the code you want
+  to be documented. Anchors look like this by default (of course,
+  anchor's style is fully modifiable):
+
+  : Documentation: README.org:Introduction
+
+  Then, when you move your cursor to start of anchor line, or anywhere
+  in code enclosed in a scope having an anchor, Emacs will
+  automatically, after configurable interval, open up the
+  documentation file (in the example =README.org=) for you and jump
+  that buffer's cursor to the correct location — in this example, at
+  header "Introduction" — unless the cursor's already there.
+
+  It is possible to configure Doc-Em to present a pop up confirmation
+  prompt before jumping. A pending jump can be disabled with a
+  key-bindable command (actually any executed command that doesn't
+  move the cursor, e.g. ~ignore~, will stop the pending jump).
+
+  The automatic jump can also be turned off completely, after which a
+  jump can be triggered manually with a key-bindable command. A jump
+  can also easily be backtracked with a key-bindable command.
+
+** Limitations
+
+   Currently, Doc-Em only works if the documentation is in [[https://orgmode.org/][org-mode]]
+   format, because jump target location search only works in that mode
+   at the moment.
+
+   The code you document can be in any mode for which
+   ~backward-up-list~ and =newcomment.el= work.
+
+* Tutorial
+
+  First, load =doc-em.el=. If you installed Doc-Em using Emacs'
+  package system, then it's autoloaded for you. If you downloaded this
+  file, then load it: ~M-x load-file <RET> path/to/doc-em.el <RET>~.
+
+  We won't start Doc-em quite yet, though. First, let's create a
+  documentation file and a code file.
+
+  For this tutorial's purposes, we will first create a directory in
+  temporary storage and later two files in the directory. You can
+  create the directory e.g. like this:
+
+  : C-: (find-file (make-temp-file "doc-em" t)) <RET>
+
+  This will open the newly created directory (in my computer,
+  =/tmp/doc-emJvuBg7=) in a dired buffer. Next, create a new file
+  called =book-rec-doc.org= with e.g.
+
+  : C-x C-f book-rec-doc.org <RET>
+
+  You'll get a fresh org-mode file. Write some document with headings
+  in the file. For example:
+
+  #+CAPTION: Example documentation. Note, this isn't related to Doc-em in any way.
+  #+BEGIN_SRC org
+    ,* Book recommender
+
+      Picks an unread book from the =book-database= with the best
+      http://goodreads.com rating.
+
+      Run with ~M-: (br--recommend)~ and you'll get a message of the next
+      book to read.  Read it and mark it read - or write your own rating!
+
+    ,** Internals
+
+       The database is in [[Book database]], in org-mode (https://orgmode.org)
+       table format.
+
+       The ~br--recommend~ function works so that it opens a specified
+       buffer (if not given, defaults to a buffer called
+       =book-rec-doc.org=). It uses the org-mode function
+       ~org-table-map-tables~ that goes through all tables in the buffer
+       and runs a function for each for side effects. In this case, the
+       function checks if the current table's name matches to the
+       specified (if not given, defaults to =book-database=), and if it
+       does, picks the best unread book from that table.
+
+       In the end, the book's author and title are displayed. Note that
+       due to how ~org-table-map-tables~ works, the *last* table with the
+       specified name will be used.
+
+    ,* Book database
+
+      ,#+NAME: book-database
+      | Author     | Book title          | GR Rating | Read?         |
+      |------------+---------------------+-----------+---------------|
+      | Dostoevsky | The Idiot           | ★★★★      | yes           |
+      | Graham     | On Lisp             | ★★★★      | halfway there |
+      | Austen     | Pride and Prejudice | ★★★★      |               |
+      | Watterson  | Calvin and Hobbes   | ★★★★★     |               |
+
+    ,** Book database format
+
+       About rating: only the length of the rating string (in characters)
+       matters, not the contents.
+
+       Same with "Read?" column, if the cell is not empty, it means it's
+       been read. Hence you can write e.g. "halfway there", which means
+       it's lying on your bedside table or something and won't be
+       recommended again.
+
+       The book database has certain order of columns. If that is changed,
+       the loop running the ~defalias~ forms needs to be changed as well.
+  #+END_SRC
+
+  Create another new file, this time an Emacs lisp file (the code
+  file):
+
+  : C-x C-f book-rec.el <RET>
+
+  In this file, insert the following contents:
+
+  #+CAPTION: Example code. Note, this isn't related to Doc-em in any way.
+  #+BEGIN_SRC elisp
+    ;;; Documentation: book-rec-doc.org:Book recommender
+
+    (require 'cl-lib)
+
+    (cl-loop
+     ;; Documentation: book-rec-doc:Book database format
+     for (colname . fun) in '((br--auth . car) (br--title . cadr)
+                              (br--rating . caddr) (br--read . cadddr))
+     do (defalias colname fun))
+
+    (defun br--pick-best-unread (table)
+      ;; Documentation: book-rec-doc.org:Book database
+      "Pick first entry from TABLE (list of lists) that has nothing
+    in 'read' column and longest 'rating' column."
+      (car (cl-sort (cl-remove-if-not (lambda (x) (string= x "")) table :key 'br--read)
+                    '> :key (lambda (x) (length (br--rating x))))))
+
+    (defun br--recommend (&optional buffer db-name)
+      ;; Documentation: book-rec-doc.org:Internals
+      "Feed org-table with DB-NAME in BUFFER to function
+    `br--pick-best-unread' to get an entry and present it to user."
+      (with-current-buffer (or buffer "book-rec-doc.org")
+        (let (book)
+          (org-table-map-tables
+           (lambda ()
+             (when (string= (org-element-property :name (org-element-at-point))
+                            (or db-name "book-database"))
+               (setf book (br--pick-best-unread (cddr (org-table-to-lisp)))))))
+          (if book (message "%s: %s" (br--auth book) (br--title book))
+            (message "You've read everything in your library!")))))
+  #+END_SRC
+
+  When in the =book-rec.el= file, start the =doc-em= minor mode:
+
+  : M-x doc-em-mode <RET>
+
+  Then, move your cursor around the code (with keyboard and mouse if
+  you like) and see how the documentation window gets opened and the
+  window is centered to the title in each anchor.
+
+  Then you can try canceling the upcoming jump: first move the cursor
+  e.g. from line ~(defun br--recommend...~ to line ~(defun
+  br--pick-best-unread...~ or in any other way so that the active
+  anchor changes, and then quickly press the key combination ~C-c
+  _~. That should abort the upcoming jump and the documentation window
+  shouldn't update.
+
+  Next, try to disable automatic jumping. You can do that by changing
+  variable ~doc-em-autojump-p~ for example by using customize like
+  this:
+
+  : M-x customize-group <RET> doc-em <RET> 
+
+  Then click on "Doc Em Autojump P", toggle it from on to off (nil)
+  and click on state and choose "Set for current session". Then quit
+  the customize (with =q= for example) to return to the code file, and
+  try moving cursor; Doc-em shouldn't jump any more
+  automatically. Instead, you can trigger a jump with ~C-c _~.
+
+  Doc-em saves the previous point before jumping with ~push-mark~, so
+  if Doc-em jumped by mistake, you can return to the previous point
+  with ~C-c &~
+
+  Finally, you can disable the mode with
+
+  : M-x doc-em-mode <RET>
+
+** Some Other Examples
+
+   A lisp function with a doc-em link could look like this:
+
+   #+BEGIN_SRC lisp
+     (defun a-function (param1 param2)
+       ;; Documentation: filename.org:Section name
+       "This is the docstring of the function; doc-em won't mess it up in
+     any way."
+       (do-things))
+   #+END_SRC
+
+   And a C program (or C++, Java, etc. program):
+
+   #+BEGIN_SRC c
+     /**
+      ,* you can have traditional documentation blocks; doc-em won't mess
+      ,* them up.
+      ,**/
+     int function(int arg1, char* arg2)
+     {
+         /* Documentation: filename.org:Section name */
+         return do_something(arg1) ^ and_something(arg2);
+     }
+   #+END_SRC
+
+*** More convoluted examples
+
+    Any scope can be used to insert an anchor:
+
+    #+BEGIN_SRC lisp
+      (defun weird-function (; Documentation: filename.org:Arguments require explaining
+                             arg1 arg2)
+        ;; Documentation: filename.org:About the function
+        "Docstring"
+        (do-something))
+    #+END_SRC
+
+    Likewise in C or C++. The possibilities are numerous; e.g. angle
+    brackets for templates in C++ count as scopes, too.
+
+    #+BEGIN_SRC c
+            int function2(// Documentation: filename.org:These arguments are tricky!
+                         int arg1, char* arg2)
+            {
+                /* Documentation: filename.org:Section name */
+                return do_something(arg1) ^ and_something(arg2);
+            }
+    #+END_SRC
+
+
+* Settings
+
+  All user-modifiable settings are implemented so that they can be
+  modified via Emacs' customize system:
+
+  : M-x customize-group <RET> doc-em <RET>
+
+  The variables ~doc-em-tag~, ~doc-em-separator~ define what the
+  anchor looks like. Anchor consists of comment-start + space +
+  ~doc-em-tag~ + filename + ~doc-em-separator~ + title name +
+  comment-end. Note that filename and title name regexp search is
+  non-greedy, so title can't right now contain comment-end, and
+  filename can't contain ~doc-em-separator~. If you modify these
+  variables with customize, their global values will be changed; a
+  better approach could be to make them buffer-local in the buffer
+  where you want to modify them.
+
+  The variable ~doc-em-autojump-p~ can be used to turn the jumping on
+  (when ~t~) and off (when ~nil~) without turning the mode off
+  completely. This allows using the key binding
+  ~doc-em-cancel-or-force-jump-keybinding~ (defaults to ~C-c _~) to
+  explicitly do the jump, even if you don't want automatic jumping.
+
+  Another variable ~doc-em-pop-document-mark-keybinding~ (defaults to
+  ~C-x . .~) defines the key binding for backtracking jumps; it calls
+  ~doc-em-win-pop-mark~ that works like popping a mark in Emacs in
+  general.
+
+  Other settings are pretty much extensively documented in the
+  docstrings, so just check the customize options.
+
+* Technical description
+
+  At initialization, when Doc-em minor mode is activated, a function
+  is added into a hook in order to detect movement. See [[Emacs
+  interface: hooking Doc-em]].
+
+  The function added into the hook starts or restarts a timer when the
+  cursor is moved, by default. The timer is there to prevent possibly
+  disorientating jumping around (and futile consumption of CPU cycles)
+  if user scrolls around with e.g. mouse wheel or arrow key held
+  down. See [[Hook function]].
+
+  When the timer is triggered, it will call another function for
+  searching the anchor in current scope stack and opening and
+  displaying the documentation in another window if an anchor was
+  found. See [[Search and jump to documentation]].
+
+  When the Doc-em minor mode is disabled, the function is removed from
+  the hook.
+
+  The following sections describe the above parts in more detail.
+
+** Emacs interface: hooking Doc-em
+
+   The function ~doc-em--set-timer-if-moved~ is inserted into
+   buffer-local ~post-command-hook~. This hook was chosen as no other
+   hook really exists that captures all cursor moving commands,
+   including mouse clicks.
+
+** Hook function
+
+   The function inserted in the hook, ~doc-em--set-timer-if-moved~,
+   will first check the following things:
+   - is automatic jumping turned on?
+   - has cursor moved, but not as a result of character modifying
+     commands?
+   If the answer to all is "yes", the jump timer will be started or
+   restarted (that is, first canceled and then started again with
+   fresh timeout), and if not canceled by some action within jump
+   timer timeout, another function will be called when the timer is
+   triggered.
+
+   The timer, ~doc-em--move-timer~, is /not/ buffer local, as multiple
+   timers in one Emacs editing session do not make sense (and
+   resulting behavior could appear chaotic).
+
+   If the answer to some questions above is "no", the possibly running
+   jump timer is canceled.
+
+   See [[Jump timer (re)start]] for a closer look at why these checks are
+   made.
+
+   Hook function also stores the current buffer to variable
+   ~doc-em--buffer-at-activation~; see [[Search and jump to
+   documentation]] for how and why this is used.
+
+   Note that Doc-em will do the jumps e.g. in interactive search mode
+   — this is intentional. (Maybe should be configurable?)
+
+*** Jump timer (re)start
+
+    Jump timer is not restarted if current buffer's
+    ~buffer-chars-modified-tick~ has increased meaning the buffer has
+    been edited, or the cursor hasn't moved since the last time the
+    jump timer was restarted.
+
+    The reason why editing commands won't restart the timer is that the
+    current editing operation may edit e.g. the scope or the anchor,
+    which could cause unexpected jumps.
+
+    To detect if a command moved the cursor, the point at timer
+    restart is kept in buffer local variable
+    ~doc-em--prev-cmd-point~. If the jump timer is restarted,
+    ~doc-em--prev-cmd-point~ is set to the current ~point~ at that
+    moment. If a command doesn't move the cursor, these two points
+    will be the same. This approach was chosen, as e.g. enumerating
+    the commands that do move the cursor is a well-nigh impossible
+    task. Checking if the cursor moves saves CPU cycles, as the
+    command hook is run after each command but obviously there's only
+    need for a jump, potentially, when the cursor has moved.
+
+*** Jump timer canceling
+
+    If any of the conditions listed in [[Hook function]] isn't fulfilled,
+    the timer is canceled. This is because user has performed
+    something other than cursor movement and a jump could be
+    unexpected.
+
+    This means, if any executed command doesn't move the cursor, the
+    current timer is canceled. The pending jump cancellation command
+    ~doc-em-toggle-jump~ is based on this — it does nothing except
+    write a message to the user, unless automatic jumping is disabled
+    whereupon it /will/ trigger a jump.
+
+** Search and jump to documentation
+
+   The timer (explained in [[Hook function]]) triggers function
+   ~doc-em--search-and-update-doc~ which will search for an anchor and
+   do the jump, if:
+   - the current buffer is still the same as when the timer was set —
+     this is checked because the user might have changed the active
+     buffer while the timer was running and probably doesn't want the
+     jump to happen in that case
+   - the current point is different to the last point when a jump was
+     actualized — this check is made for avoiding spending CPU cycles
+     in vain. (However, it may be a valid use-case: user has scrolled
+     the documentation window and now wants to jump back to the
+     anchored place by moving cursor right-and-left. To be decided if
+     this check should be removed.)
+
+   If the jump is to be performed, first the anchor is searched for
+   and parsed. See [[Find and parse anchor]]. If that is successful, the
+   documentation file is opened to a buffer if necessary, a window for
+   the documentation buffer is created if necessary, and then the
+   point of the window showing the documentation buffer is set to the
+   desired location — see [[Opening documentation window]] and [[Seeking to
+   correct documentation location]].
+
+*** Find and parse anchor
+
+    The function ~doc-em--search-doc-specifier~ tries to find the
+    anchor. Search for the anchor starts from the current point. If
+    there's an anchor at or after the current point, it is used. If
+    not, the edited program's scope stack will be climbed towards root
+    with Emacs' function ~backward-up-list~. This basically determines
+    what programming languages are supported and how. It's used
+    because it's part of standard Emacs and it works quite well with
+    anything I've tried it with.
+
+    The anchor is a comment line. Different programming languages have
+    different comments. Doc-em relies on the =newcomment.el= package,
+    which comes with Emacs, and regex for trying to parse the
+    anchor. Due to this, there are limitations in the anchor contents,
+    described in section [[Settings]].
+
+    The anchor consists of a filename and a heading name, which are
+    returned to the search and jump -function (see [[Search and jump to
+    documentation]]).
+
+*** Opening documentation window
+
+    Unless there is already a window displaying the documentation
+    buffer, Doc-em either sets the window on right or left of the
+    current programming window to display the documentation buffer, or
+    if there's no window to the right or left, splits the current
+    window and shows the documentation buffer on the right hand side
+    of the split.
+
+    This is a completely arbitrary decision and could be something the
+    user wants to be done in an entirely different way; users are
+    encouraged to change the implementation! Just modify
+    ~doc-em--open-doc-window~ and return a handle to the desired
+    window.
+
+*** Seeking to correct documentation location
+
+    The function ~doc-em--org-jump-to-correct-location~ is called from
+    the main search function (See [[Search and jump to documentation]])
+    for scrolling the documentation window into right place.
+
+    Internally, it first checks if the documentation window's cursor
+    is already in the desired (sub-)heading, anywhere inside the text
+    under the heading, by querying the current point's outline-path
+    with ~org-get-outline-path~. If the cursor is already there,
+    nothing is done.
+
+    Otherwise, the org-mode function ~org-goto-local-search-headings~
+    is utilized to locate the correct heading and then cursor moved
+    with ~set-window-point~.
+
+    Before moving the cursor, the current point is saved into Emacs'
+    mark ring (by default). Also, the documentation buffer is stored
+    to ~doc-em--buffer-of-last-jump~ so that ~doc-em-win-pop-mark~
+    knows which buffer's mark to pop, if the user wants to do that
+    (bound by default to =C-c &=). (Note that this functionality
+    doesn't work properly if the code refers to multiple documentation
+    files — the ~doc-em-win-pop-mark~ only knows the buffer of the
+    /latest/ jump that happened and will cycle marks in that
+    buffer. Todo: Maybe use the global mark ring?)
+
+    Currently only org-mode documents are supported. For support for
+    other documentation modes, first some logic should be implemented
+    in Doc-em that'd choose an appropriate function for jumping to a
+    documentation headline. Also the appropriate function should be
+    implemented for that mode.
+
+* TODO
+
+** Old stuff
+
+   What doc-em does is basically this:
+   - Adds a function ~doc-em--set-timer-if-moved~ in buffer's local
+     ~post-command-hook~ which starts or restarts a timer. This hook is
+     used as all moving executes a command, including mouse clicks.
+   - The timer, then, checks whether the point has moved from where it
+     was earlier in the buffer. If it has, it will try and search for a
+     matching anchor. First try if there's an anchor at current
+     ~point~, and if not, then start going up the scope in a loop until
+     anchor is found.
+   - Searching for anchor requires detecting the program-being-edited's
+     scopes in the buffer. Uses standard Emacs' function
+     ~backward-up-list~ for this.
+   - Scopes are walked upwards until a comment with an anchor is found
+     (either at point of opening scope, or one line down). Uses the
+     =newcomment.el= standard package.
+   - Parsing an anchor with regexps.
+   - Opening a window with the documentation in it, or showing an
+     already opened window with the document.
+   - Jumping to the correct place in the document.
+
+    (How to find the anchor?)
+
+    (How about moving at the anchor directly?)
+
+** Scope detection
+
+** Handling comments
+
+   The standard Emacs package =newcomment.el= is used for handling the
+   comments.
+
+*** Comment line parsing
+
+    The blabla will connect to the xyzzy.
+
+
+** Jumping in document
+
+   Currently, only org-mode documents are supported. To expand to
+   other modes, the function ~doc-em--org-jump-to-corre~
+
+   The location is searched with ~org-goto-local-search-headings~
+   function.
