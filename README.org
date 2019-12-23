@@ -40,6 +40,9 @@
 
 * Tutorial
 
+  #+CAPTION: Short demo of Doc-em
+  [[https://peruna.fi/~newcup/doc-em/demo.gif]]
+
   First, load =doc-em.el=. If you installed Doc-Em using Emacs'
   package system, then it's autoloaded for you. If you downloaded this
   file, then load it: ~M-x load-file <RET> path/to/doc-em.el <RET>~.
@@ -128,7 +131,7 @@
     (require 'cl-lib)
 
     (cl-loop
-     ;; Documentation: book-rec-doc:Book database format
+     ;; Documentation: book-rec-doc.org:Book database format
      for (colname . fun) in '((br--auth . car) (br--title . cadr)
                               (br--rating . caddr) (br--read . cadddr))
      do (defalias colname fun))
