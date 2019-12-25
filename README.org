@@ -277,9 +277,9 @@
 
 * Technical description
 
-  At initialization, when Doc-em minor mode is activated, a function
-  is added into a hook in order to detect movement. See [[Emacs
-  interface: hooking Doc-em]].
+  When Doc-em mode is started, it will initialize some variables, and
+  add a function into a hook in order to detect movement. See [[Starting
+  Doc-em mode]].
 
   The function added into the hook starts or restarts a timer when the
   cursor is moved, by default. The timer is there to prevent possibly
@@ -297,7 +297,17 @@
 
   The following sections describe the above parts in more detail.
 
-** Emacs interface: hooking Doc-em
+** Starting Doc-em mode
+
+   First, some variables are cleared or reset with
+   ~doc-em--reset-local-state~; this resets all variables defined
+   using macro ~defvar--doc-em-local-rst~ to the specified initial
+   values (which are evaluated at the reset-function calling
+   time). The reason to reset these is that e.g. if user turns Doc-em
+   off, modifies buffer, and turns Doc-em back on again and then moves
+   cursor, ~doc-em--chars-modified-tick~ would be left to previous
+   value and the first purely moving command wouldn't trigger a jump,
+   but Doc-em would think the buffer was modified.
 
    The function ~doc-em--set-timer-if-moved~ is inserted into
    buffer-local ~post-command-hook~. This hook was chosen as no other

@@ -6,7 +6,7 @@
 
 ;; Author: Janne Nykopp <newcup@iki.fi>
 ;; Keywords: live interactive documentation
-;; Version: 0.5.0
+;; Version: 0.5.1
 
 ;; This program is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published by
@@ -30,7 +30,34 @@
 (require 'cl-lib)
 (require 'org)
 
-(defvar-local doc-em--prev-cmd-point -1
+(defvar doc-em--rst-locals nil
+  ;; Documentation: README.org:Starting Doc-em mode
+  "A list of variables to reset when the mode starts.
+
+List that contains the local variable symbols and the values they
+should be reset to when mode is turned off.  This list is
+initialized by using macro `defvar--doc-em-local-rst'.")
+
+(defmacro defvar--doc-em-local-rst (name value &optional docstring)
+  ;; Documentation: README.org:Starting Doc-em mode
+  "Define a local variable, add it to list of variables to reset.
+
+Expands as `defvar-local', but before that inserts the NAME and
+VALUE to the `doc-em--rst-locals' list, only if they are not
+there already.  Note, this is supposed to be used on top level
+only (caveats of `defvar' apply), and during load-time only.
+Optional argument DOCSTRING is passed only to the internal
+`defvar-local'."
+  (cl-pushnew (cons name value) doc-em--rst-locals :key #'car)
+  `(defvar-local ,name ,value ,docstring))
+
+(defun doc-em--reset-local-state ()
+  ;; Documentation: README.org:Starting Doc-em mode
+  "Reset the locals that are in the `doc-em--rst-locals' list."
+  (cl-dolist (pair doc-em--rst-locals)
+    (set (car pair) (eval (cdr pair)))))
+
+(defvar--doc-em-local-rst doc-em--prev-cmd-point -1
   ;; Documentation: README.org:Jump timer (re)start
   "`point' when previous command was issued.
 
@@ -39,7 +66,7 @@ With this, we avoid initializing or restarting timers in vain in
 cursor has really moved.  Initialized with -1, so any position is
 a new one when starting up.")
 
-(defvar-local doc-em--last-doc-show-point -1
+(defvar--doc-em-local-rst doc-em--last-doc-show-point -1
   ;; Documentation: README.org:Search and jump to documentation
   "`point' where documentation window was last updated.
 
@@ -50,7 +77,7 @@ back to where it was last time the documentation
 updated.  Initialized with -1, so any position is a new one when
 starting up.")
 
-(defvar-local doc-em--chars-modified-tick nil
+(defvar--doc-em-local-rst doc-em--chars-modified-tick (buffer-chars-modified-tick)
   ;; Documentation: README.org:Jump timer (re)start
   "Number of text changes done in the buffer since last command.
 
@@ -251,7 +278,7 @@ Works only with `org-mode' documents."
           (if pos (progn (unless dont-push-mark-p (push-mark orig-point t)
                                  (setf doc-em--buffer-of-last-jump buf))
                          (doc-em--move-doc-win buf pos))
-            (message "Heading '%s' was not found" location)))))))
+            (message "Doc-em: Heading '%s' was not found" location)))))))
 
 (defun doc-em-toggle-jump ()
   ;; Documentation: README.org:Jump timer canceling
@@ -305,9 +332,9 @@ If cursor was moved from previous command, initialize or restart
 a timer which will execute a function for doing a jump to the
 documentation after `doc-em-timeout' seconds.
 
-If last command didn't move the cursor or was one of commands
-that are ignored (e.g. ‘self-insert-command’, yank), cancel the
-existing timer."
+If last command didn't move the cursor or modified
+buffer (e.g. ‘self-insert-command’, yank), cancel the existing
+timer."
   (when doc-em-autojump-p
     (let ((p (point))
           (old-bcm doc-em--chars-modified-tick)
@@ -315,14 +342,12 @@ existing timer."
       (setf doc-em--chars-modified-tick (buffer-chars-modified-tick))
       (if (or (= doc-em--prev-cmd-point p)
               (< old-bcm doc-em--chars-modified-tick))
-          ;; Was a command to be ignored, buffer modifying command, or
-          ;; cursor didn't move - cancel timer
+          ;; Buffer was modified or cursor didn't move - cancel timer
           (cancel-timer doc-em--move-timer)
         ;; Cursor moved - set variables, restart timer
         (progn
           ;; Documentation: README.org:Jump timer (re)start
           (setf doc-em--prev-cmd-point p
-                                        ;doc-em--do-jump-p t
                 doc-em--buffer-at-activation (current-buffer))
           (when doc-em--move-timer
             (cancel-timer doc-em--move-timer))
@@ -347,7 +372,7 @@ in the location."
       (progn
         (cancel-timer doc-em--move-timer)
         (remove-hook 'post-command-hook 'doc-em--set-timer-if-moved :local))
-    (setf doc-em--chars-modified-tick (buffer-chars-modified-tick))
+    (doc-em--reset-local-state)
     (add-hook 'post-command-hook 'doc-em--set-timer-if-moved t :local)))
 
 (provide 'doc-em)
