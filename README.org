@@ -5,7 +5,8 @@
   With Doc-Em, you can /jump/ to relevant documentation immediately
   and update it while you're editing code. /Jump/ in Doc-Em means the
   cursor stays in the code buffer, but a documentation window is
-  opened on the side and it actively seeks to the relevant point.
+  opened on the side and seeked to the location corresponding to the
+  code at cursor.
 
   You just need to insert /anchors/ as comments in the code you want
   to be documented. Anchors look like this by default (of course,
@@ -16,18 +17,21 @@
   Then, when you move your cursor to start of anchor line, or anywhere
   in code enclosed in a scope having an anchor, Emacs will
   automatically, after configurable interval, open up the
-  documentation file (in the example =README.org=) for you and jump
-  that buffer's cursor to the correct location — in this example, at
-  header "Introduction" — unless the cursor's already there.
+  documentation file (in the case of =doc-em.el= it's this
+  =README.org=) for you and jump that buffer's cursor to the correct
+  location — in =doc-em.el= case, at header "Introduction" — unless
+  the cursor's already there.
 
   It is possible to configure Doc-Em to present a pop up confirmation
   prompt before jumping. A pending jump can be disabled with a
-  key-bindable command (actually any executed command that doesn't
-  move the cursor, e.g. ~ignore~, will stop the pending jump).
+  key-bindable command, bound by default to =C-c _=. (Actually any
+  executed command that doesn't move the cursor, e.g. ~ignore~, will
+  stop the pending jump).
 
   The automatic jump can also be turned off completely, after which a
   jump can be triggered manually with a key-bindable command. A jump
-  can also easily be backtracked with a key-bindable command.
+  can also easily be backtracked with a key-bindable command, bound by
+  default to =C-c &=.
 
 ** Limitations
 
@@ -35,8 +39,9 @@
    format, because jump target location search only works in that mode
    at the moment.
 
-   The code you document can be in any mode for which
-   ~backward-up-list~ and =newcomment.el= work.
+   The code you document can be in any mode the Emacs built-in
+   function ~backward-up-list~ and built-in library =newcomment.el=
+   support.
 
 * Tutorial
 
@@ -50,7 +55,7 @@
   We won't start Doc-em quite yet, though. First, let's create a
   documentation file and a code file.
 
-  For this tutorial's purposes, we will first create a directory in
+  For this tutorial's purposes, we begin by creating a directory in
   temporary storage and later two files in the directory. You can
   create the directory e.g. like this:
 
@@ -219,6 +224,28 @@
      }
    #+END_SRC
 
+    In some languages it's not possible — or it might not be idiomatic
+    style — to create arbitrary scopes on top level of program code
+    file. In these cases, you can insert a top level separator
+    followed by the anchor:
+
+    #+BEGIN_SRC asm
+      ...
+      addl    %eax, %ecx
+      test    %eax
+      jbe     1f
+
+      // ----- some headline for the following code -----
+      // Documentation: filename.org:Section name
+      pop     %eax
+      xor     %ecx, %ecx
+      ...
+    #+END_SRC
+
+    The top level separator is a comment line starting with ~-----~
+    and space, followed by a description, then space and comment line
+    ending with ~-----~.
+
 *** More convoluted examples
 
     Any scope can be used to insert an anchor:
@@ -243,7 +270,6 @@
             }
     #+END_SRC
 
-
 * Settings
 
   All user-modifiable settings are implemented so that they can be
@@ -260,6 +286,16 @@
   variables with customize, their global values will be changed; a
   better approach could be to make them buffer-local in the buffer
   where you want to modify them.
+
+  The variable ~doc-em-toplevel-separator~ describes the style of an
+  separator that partitions the top level of the code file to separate
+  documented sections. An anchor line must be placed under this
+  separator line. This allows for dividing the top level code into
+  documented chunks in e.g. languages that don't allow creating
+  arbitrary scoped code blocks. If you use comment-based folding mode,
+  you can set this to match a fold-opener sequence (e.g. ~(rx "{{{ "
+  (one-or-more (or alnum space)))~ for the default fold marks for
+  https://www.emacswiki.org/emacs/folding.el).
 
   The variable ~doc-em-autojump-p~ can be used to turn the jumping on
   (when ~t~) and off (when ~nil~) without turning the mode off
@@ -278,8 +314,8 @@
 * Technical description
 
   When Doc-em mode is started, it will initialize some variables, and
-  add a function into a hook in order to detect movement. See [[Starting
-  Doc-em mode]].
+  add a function into Emacs' post-command hook in order to detect
+  movement. See [[Starting Doc-em mode]].
 
   The function added into the hook starts or restarts a timer when the
   cursor is moved, by default. The timer is there to prevent possibly
@@ -407,12 +443,26 @@
 
     The function ~doc-em--search-doc-specifier~ tries to find the
     anchor. Search for the anchor starts from the current point. If
-    there's an anchor at or after the current point, it is used. If
-    not, the edited program's scope stack will be climbed towards root
-    with Emacs' function ~backward-up-list~. This basically determines
-    what programming languages are supported and how. It's used
-    because it's part of standard Emacs and it works quite well with
-    anything I've tried it with.
+    there's an anchor at or immediately after the current point, it is
+    used. If not, the edited program code's scope stack will be
+    climbed towards root with Emacs' function ~backward-up-list~. This
+    basically determines what programming languages are supported and
+    how. It's used because it's part of standard Emacs and it works
+    quite well with anything I've tried it with.
+
+    If there is no anchor found when climbing like this until
+    ~backward-up-list~ fails when it hits the top level, the next
+    strategy is to search backwards for the closest comment line
+    containing ~doc-em-toplevel-separator~, followed by an anchor
+    line.
+
+    If no such top level separator is found either, skip to the
+    beginning of the file and search for an anchor line from the top,
+    until the first non-comment line.
+
+    If no anchor is found at all, no jump is performed. Note that all
+    this searching won't move the point or mark or be visible to user
+    in any way.
 
     The anchor is a comment line. Different programming languages have
     different comments. Doc-em relies on the =newcomment.el= package,
@@ -451,9 +501,9 @@
     with ~org-get-outline-path~. If the cursor is already there,
     nothing is done.
 
-    Otherwise, the org-mode function ~org-goto-local-search-headings~
-    is utilized to locate the correct heading and then cursor moved
-    with ~set-window-point~.
+    Otherwise, the org-mode function
+    ~org-find-exact-headline-in-buffer~ is utilized to locate the
+    correct heading and then cursor moved with ~set-window-point~.
 
     Before moving the cursor, the current point is saved into Emacs'
     mark ring (by default). Also, the documentation buffer is stored

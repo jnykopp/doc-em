@@ -2,11 +2,13 @@
 ;;;
 ;;; Documentation: README.org:Introduction
 
-;; Copyright (C) 2019  Janne Nykopp
+;; Copyright (C) 2019-2021  Janne Nykopp
 
 ;; Author: Janne Nykopp <newcup@iki.fi>
-;; Keywords: live interactive documentation
-;; Version: 0.5.1
+;; Version: 0.6.0
+;; Package-requires: ((emacs "25.1"))
+;; Keywords: tools docs
+;; URL: https://peruna.fi/~newcup/doc-em
 
 ;; This program is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published by
@@ -30,16 +32,18 @@
 (require 'cl-lib)
 (require 'org)
 
+
+;;; ----- Code for (re)starting Doc-em mode -----
+;;; Documentation: README.org:Starting Doc-em mode
+
 (defvar doc-em--rst-locals nil
-  ;; Documentation: README.org:Starting Doc-em mode
   "A list of variables to reset when the mode starts.
 
 List that contains the local variable symbols and the values they
 should be reset to when mode is turned off.  This list is
-initialized by using macro `defvar--doc-em-local-rst'.")
+initialized by using macro `doc-em--defvar-local-rst'.")
 
-(defmacro defvar--doc-em-local-rst (name value &optional docstring)
-  ;; Documentation: README.org:Starting Doc-em mode
+(defmacro doc-em--defvar-local-rst (name value &optional docstring)
   "Define a local variable, add it to list of variables to reset.
 
 Expands as `defvar-local', but before that inserts the NAME and
@@ -52,12 +56,11 @@ Optional argument DOCSTRING is passed only to the internal
   `(defvar-local ,name ,value ,docstring))
 
 (defun doc-em--reset-local-state ()
-  ;; Documentation: README.org:Starting Doc-em mode
   "Reset the locals that are in the `doc-em--rst-locals' list."
   (cl-dolist (pair doc-em--rst-locals)
     (set (car pair) (eval (cdr pair)))))
 
-(defvar--doc-em-local-rst doc-em--prev-cmd-point -1
+(doc-em--defvar-local-rst doc-em--prev-cmd-point -1
   ;; Documentation: README.org:Jump timer (re)start
   "`point' when previous command was issued.
 
@@ -66,7 +69,7 @@ With this, we avoid initializing or restarting timers in vain in
 cursor has really moved.  Initialized with -1, so any position is
 a new one when starting up.")
 
-(defvar--doc-em-local-rst doc-em--last-doc-show-point -1
+(doc-em--defvar-local-rst doc-em--last-doc-show-point -1
   ;; Documentation: README.org:Search and jump to documentation
   "`point' where documentation window was last updated.
 
@@ -77,13 +80,16 @@ back to where it was last time the documentation
 updated.  Initialized with -1, so any position is a new one when
 starting up.")
 
-(defvar--doc-em-local-rst doc-em--chars-modified-tick (buffer-chars-modified-tick)
+(doc-em--defvar-local-rst doc-em--chars-modified-tick (buffer-chars-modified-tick)
   ;; Documentation: README.org:Jump timer (re)start
   "Number of text changes done in the buffer since last command.
 
 Holds a cache of output value from `buffer-chars-modified-tick'
 Used in figuring out whether a command edited the buffer. If it
 edited, we don't want to jump in documentation.")
+
+
+;;; ----- Buffer local variables -----
 
 (defvar doc-em--move-timer nil
   ;; Documentation: README.org:Hook function
@@ -104,6 +110,9 @@ user changed buffers in the meanwhile.")
   "In which buffer we jumped last time.
 
 Used e.g. for undoing a jump by popping the mark.")
+
+
+;;; ----- Settings and related code -----
 
 (defmacro doc-em--set-custom (func)
   ;; Documentation: README.org:Settings
@@ -130,6 +139,16 @@ keybinding value symbol if one exists."
     "How many seconds to wait until updating the doc window."
     :group 'doc-em
     :type 'number)
+
+  (defcustom doc-em-toplevel-separator
+    (rx-to-string
+     `(sequence
+       space "-----" space (zero-or-more (or word punct space)) space "-----"))
+    "Regex for top-level documentation separator.
+Note, when used by doc-em, it will be automatically prepended
+with `comment-start-skip' and and appended by `comment-end-skip'."
+    :group 'doc-em
+    :type 'string)
 
   (defcustom doc-em-tag "Documentation: "
     "The string that starts the documentation specification."
@@ -174,8 +193,11 @@ forces a jump."
       (define-key km doc-em-pop-document-mark-keybinding 'doc-em-win-pop-mark)
       km)))
 
+
+;;; ----- Code for finding an anchor -----
+;;; Documentation: README.org:Find and parse anchor
+
 (defun doc-em--try-parse-comment-at-point ()
-  ;; Documentation: README.org:Find and parse anchor
   "Try to parse the comment at the current point.
 
 Return nil, if unsuccessful, otherwise cons (file . headline)."
@@ -191,20 +213,34 @@ Return nil, if unsuccessful, otherwise cons (file . headline)."
       (cons (match-string 1 line) (match-string 2 line)))))
 
 (defun doc-em--comment-at-or-after-cursor-p ()
-  ;; Documentation: README.org:Find and parse anchor
   "Is there a comment after the cursor?"
   (comment-only-p (point) (line-end-position)))
 
+(defun doc-em--find-prev-toplevel-separator ()
+  "Find the closest previous top level separator. Return the
+point, or nil if not found."
+  (re-search-backward
+   (rx-to-string `(sequence bol (0+ space)
+                            (regexp ,comment-start-skip)
+                            (regexp ,doc-em-toplevel-separator)
+                            (regexp ,comment-end-skip)))
+   nil t))
+
 (defun doc-em--search-doc-specifier ()
-  ;; Documentation: README.org:Find and parse anchor
   "Search for the closest enclosing documentation specifier.
 
 Return cons (filename . headline) if found, nil otherwise."
   (save-excursion
     (let (found)
-      (cl-symbol-macrolet ((maybe-update-found
+      (cl-symbol-macrolet ((maybe-report-found
+                            (when found
+                              (message "Doc-em: Line %d: Anchor %s: %s."
+                                       (1+ (count-lines (point-min) (point)))
+                                       (car found) (cdr found))))
+                           (maybe-update-found
                             (when (and (not found) (doc-em--comment-at-or-after-cursor-p))
-                              (setf found (doc-em--try-parse-comment-at-point)))))
+                              (setf found (doc-em--try-parse-comment-at-point))
+                              maybe-report-found)))
         (condition-case nil
             (let (curr-iteration-point)
               (while (not found)
@@ -223,12 +259,27 @@ Return cons (filename . headline) if found, nil otherwise."
                   (goto-char curr-iteration-point)
                   (backward-up-list 1 t t))))
           (scan-error
-           ;; Try to search from the file's first comment lines.
+           ;; First try to search backwards for top level separators.
+           (catch 'toplevel-sep-not-found
+             (while (not found)
+               (let ((prev-sep (doc-em--find-prev-toplevel-separator)))
+                 (unless prev-sep
+                   (throw 'toplevel-sep-not-found nil))
+                 (forward-line)
+                 maybe-update-found
+                 (goto-char prev-sep)
+                 (forward-line -1))))
+           ;; Failing that, try to search from the file's first
+           ;; comment lines.
            (goto-char (point-min))
            (while (and (not found) (doc-em--comment-at-or-after-cursor-p))
              (setf found (doc-em--try-parse-comment-at-point))
+             maybe-report-found
              (forward-line)))))
       found)))
+
+
+;;; ----- Code for documentation window handling -----
 
 (defun doc-em--open-doc-window (buf)
   ;; Documentation: README.org:Opening documentation window
@@ -238,13 +289,15 @@ Return cons (filename . headline) if found, nil otherwise."
                    (split-window-right))))
       (set-window-buffer win buf))))
 
+
+;;; ----- Code for seeking in the documentation file -----
+;;; Documentation: README.org:Seeking to correct documentation location
+
 (defun doc-em--move-doc-win (buf pos)
-  ;; Documentation: README.org:Seeking to correct documentation location
   "Scroll the window displaying BUF to position POS."
   (set-window-point (get-buffer-window buf) pos))
 
 (defun doc-em--org-jump-to-correct-location (buf location &optional dont-push-mark-p)
-  ;; Documentation: README.org:Seeking to correct documentation location
   "Search for the target LOCATION to jump to in buffer BUF.
 
 If DONT-PUSH-MARK-P is nil (default), push the mark in mark ring.
@@ -254,44 +307,14 @@ Works only with `org-mode' documents."
     (let* ((outline-path (ignore-errors (org-get-outline-path t)))
            (curr-heading (car (last outline-path)))
            (orig-point (point)))
-      ;; Note: There's a glitch in case the location starts with one
-      ;; space. `org-goto-local-search-headings' ignores _one_ leading
-      ;; space in heading name (will find "Tutorial" in same place as
-      ;; " Tutorial"). So, when curr-heading _isn't_ string-equal to
-      ;; location due to location having a leading space,
-      ;; `org-goto-local-search-headings' still finds the heading,
-      ;; leading the user to become confused about what
-      ;; happened. Workaround: compare with also location with one
-      ;; leading space removed! This is very ugly...
-      (unless (or (string-equal curr-heading location)
-                  (and (= (aref location 0)) (string-equal curr-heading (seq-subseq location 1))))
-        (let ((pos
-               ;; `org-goto-local-search-headings' seems to be
-               ;; intended to be used from some isearch context only!
-               ;; To work around that problem, bind isearch-forward to
-               ;; t and seek to the beginning of the documentation
-               ;; buffer. Note: The behavior of the org function might
-               ;; change, this is risky.
-               (let ((isearch-forward t))
-                 (goto-char (point-min))
-                 (org-goto-local-search-headings location nil t))))
+      (unless (string-equal curr-heading location)
+        (let ((pos (org-find-exact-headline-in-buffer location)))
           (if pos (progn (unless dont-push-mark-p (push-mark orig-point t)
                                  (setf doc-em--buffer-of-last-jump buf))
                          (doc-em--move-doc-win buf pos))
             (message "Doc-em: Heading '%s' was not found" location)))))))
 
-(defun doc-em-toggle-jump ()
-  ;; Documentation: README.org:Jump timer canceling
-  "Abort a scheduled jump, or force a jump when autojump is off."
-  (interactive)
-  ;; If autojump is on, then the mere activation of this command, as
-  ;; it doesn't move cursor, cancels the pending jump.
-  (if doc-em-autojump-p
-      (message "Doc-em: Upcoming jump cancelled")
-    (doc-em--search-and-update-doc)))
-
 (defun doc-em-win-pop-mark ()
-  ;; Documentation: README.org:Seeking to correct documentation location
   "Return to the point of jump in the documentation window.
 
 Change cursor back to the point where it was before a jump in the
@@ -324,6 +347,19 @@ used to jump back in previous marks."
                 (doc-em--open-doc-window buf)
                 (doc-em--org-jump-to-correct-location buf heading)))))))))
 
+
+;;; ----- Hook, timers and code related to them -----
+
+(defun doc-em-toggle-jump ()
+  ;; Documentation: README.org:Jump timer canceling
+  "Abort a scheduled jump, or force a jump when autojump is off."
+  (interactive)
+  ;; If autojump is on, then the mere activation of this command, as
+  ;; it doesn't move cursor, cancels the pending jump.
+  (if doc-em-autojump-p
+      (message "Doc-em: Upcoming jump cancelled")
+    (doc-em--search-and-update-doc)))
+
 (defun doc-em--set-timer-if-moved ()
   ;; Documentation: README.org:Hook function
   "If command moved cursor, (re)set doc-em timer, else cancel timer.
@@ -354,6 +390,9 @@ timer."
           (setf doc-em--move-timer
                 (run-with-idle-timer
                  doc-em-timeout nil 'doc-em--search-and-update-doc)))))))
+
+
+;;; ----- Mode definition -----
 
 ;;;###autoload
 (define-minor-mode doc-em-mode
