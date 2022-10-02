@@ -258,7 +258,7 @@ Return cons (filename . headline) if found, nil otherwise."
                 (when (not found)
                   (goto-char curr-iteration-point)
                   (backward-up-list 1 t t))))
-          (scan-error
+          ((user-error scan-error)
            ;; First try to search backwards for top level separators.
            (catch 'toplevel-sep-not-found
              (while (not found)
